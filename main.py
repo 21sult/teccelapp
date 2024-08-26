@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 ## Connect to Google Sheets
-conn = st.experimental_connection('gsheets', type=GSheetsConnection)
+conn = st.connection('gsheets', type=GSheetsConnection)
 df_blanks = conn.read(
             worksheet='Blocos',
             ttl=60
