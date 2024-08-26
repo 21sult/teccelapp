@@ -66,7 +66,7 @@ with tabs[0]:
         
         # Select items
         st.write('Digite a quantidade que deseja de cada item.')
-        df_order_editor = st.experimental_data_editor(df_order, width=500, height=500)
+        df_order_editor = st.data_editor(df_order, width=500, height=500)
         
         if st.button('Revisar Pedido'):
             df_order_price = df_order_editor.copy()
