@@ -1,6 +1,9 @@
+import random
+import string
 import streamlit as st
 import pandas as pd
 import smtplib
+import re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from streamlit_gsheets import GSheetsConnection
@@ -15,7 +18,7 @@ st.set_page_config(
 )
 
 ## Connect to Google Sheets
-conn = st.connection('gsheets', type=GSheetsConnection)
+conn = st.experimental_connection('gsheets', type=GSheetsConnection)
 df_blanks = conn.read(
             worksheet='Blocos',
             ttl=60
@@ -38,20 +41,42 @@ tabs = st.tabs(['Efetuar Pedido', 'Contatos'])
 ## Get distributors
 distributors = df_dist['Nome'].tolist()
 distributors.insert(0, '---') # placeholder for selectbox
+distributos_emails = df_dist['Email'].tolist()
 
 ## Get subtypes
 subtypes = ['TB','TecLight','TecGreen','Premium']
 
+## Initialise session states
+if 'order_reviewed' not in st.session_state:
+    st.session_state['order_reviewed'] = False
+if 'order_text' not in st.session_state:
+    st.session_state['order_text'] = ''
+if 'price' not in st.session_state:
+    st.session_state['price'] = 0
+
+## Function to validate email
+def is_valid_email(email):
+    
+    # Define regex pattern
+    email_pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    
+    # Check if email fits regex pattern
+    if re.match(email_pattern, email):
+        return True
+    else:
+        return False
+
+
 ## Function to send email
-def send_email(sender_email, sender_password, recipient_email, subject, message):
+def send_email(sender_email, sender_password, recipient_emails, subject, message):
     
     try:
         msg = MIMEMultipart()
         msg['From'] = sender_email
-        msg['To']	= recipient_email
+        msg['To']	= ','.join(recipient_emails)
         msg['Subject'] = subject
         
-        msg.attach(MIMEText(message, 'plain'))
+        msg.attach(MIMEText(message, 'html'))
         
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
@@ -64,8 +89,45 @@ def send_email(sender_email, sender_password, recipient_email, subject, message)
         
     except Exception as e:
         
-        sr.error('Falha ao enviar o pedido.')
+        st.error(f'Falha ao enviar o pedido: {e}')
 
+
+## Function to generate order number
+def gen_order_code(length=15):
+    
+    # List of possible characters
+    characters = string.ascii_uppercase + string.digits
+    
+    # Generate random string of specified length
+    order_code = ''.join(random.choices(characters, k=length))
+    
+    return order_code
+
+## Function to send order
+def send_order(client_name, selected_distributor, order_text, recipient_emails):
+    
+    # Order text
+    order_code = gen_order_code()
+    total_price = st.session_state['price']
+    new_order_text = (
+        f'<p>Pedido <b>#{order_code}</b></p>'
+        f'De <b>{client_name}</b> para <b>{selected_distributor}</b>'
+        #f'<p>&nbsp;</p>' # emtpy line
+        f'<ul>'
+        f'{order_text}'
+        f'</ul>'
+        f'<b>Total</b>: R&#36; {total_price}'
+    )
+    
+    # Sending email
+    sender_email = st.secrets['email_address']
+    sender_password = st.secrets['email_password']
+    subject = f'Pedido Teccel #{order_code}'
+    send_email(sender_email, sender_password, recipient_emails, subject, new_order_text)
+
+
+# --- UI --- #
+# TAB: Enviar pedido
 with tabs[0]:
     
     price = 0
@@ -85,25 +147,35 @@ with tabs[0]:
         
         st.subheader('Seu Pedido')
         
-        order_text = ''
-        
         # Select client name
         client_name = st.text_input('Seu Nome')
+        
+        # Select client email
+        client_email = st.text_input('Seu Email')
         
         # Select distributor
         selected_distributor = st.selectbox('Seu Distribuidor (Digite ou Selecione)', distributors) 
         
         # Select items
         st.write('Digite a quantidade que deseja de cada item.')
-        df_order_editor = st.data_editor(df_order, width=500, height=500)
+        df_order_editor = st.experimental_data_editor(df_order, width=500, height=500)
         
         if st.button('Revisar Pedido'):
+            
+            # Update session state
+            st.session_state['order_reviewed'] = True
+            
+            # Initialise order_text
+            order_text = ''
+            
+            # Calculate price
             df_order_price = df_order_editor.copy()
             price = df_order_price * df_prices
             price = price.sum().sum()
+            st.session_state['price'] = price
             
-            st.markdown('---')
-            st.subheader('Seu Pedido:')
+            # Get order text
+            product_amount = 0
             for blank, row in df_order_editor.iterrows():
                 
                 for blank_type, amount in row.items():
@@ -111,14 +183,38 @@ with tabs[0]:
                     if amount > 0:
                         
                         product_price = df_prices.loc[blank, blank_type]
-                        text = f'{blank} {blank_type} x{amount} (R$ {product_price})'
-                        order_text += text + '\n'
-                        st.write(text)
+                        text = f'{blank} {blank_type} x{amount} (R&#36; {product_price})'
+                        order_text += text + '<br>'
+                        
+                        product_amount += 1
             
-            st.subheader('Total: R$ ' + str(price))
+            if product_amount > 0:
+                
+                st.session_state['order_text'] = order_text
+        
+            else:
+                
+                st.session_state['order_text'] = 'O usuário não escolheu nenhum produto.'
+        
+        # Order review
+        if st.session_state['order_reviewed']:
+            
+            # Receipt (sort of)
+            st.markdown('---')
+            st.subheader('Seu Pedido:')
+            st.markdown(st.session_state['order_text'], unsafe_allow_html=True)
+            st.subheader('Total: R&#36; ' + str(st.session_state['price']))
             st.markdown('---')
             
-            st.button('Enviar Pedido')
+            teccel_email = st.secrets['email_address']
+            distributor_email = df_dist.loc[df_dist['Nome'] == selected_distributor, 'Email'].values[0]
+            recipient_emails = [teccel_email, distributor_email, client_email]
+            
+            if st.button('Enviar Pedido'):
+                if is_valid_email(client_email):
+                    send_order(client_name, selected_distributor, st.session_state['order_text'], recipient_emails)
+                else:
+                    st.warning('O email inserido é inválido.')
     
     with col2:
         
