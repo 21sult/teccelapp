@@ -19,7 +19,7 @@ st.set_page_config(
 )
 
 ## Connect to Google Sheets
-conn = st.experimental_connection('gsheets', type=GSheetsConnection)
+conn = st.connection('gsheets', type=GSheetsConnection)
 df_blanks 	= conn.read(worksheet='Blocos', ttl=60)
 df_eps 	  	= conn.read(worksheet='EPS FQ', ttl=60)
 df_dist 	= conn.read(worksheet='Distribuidores', ttl=60)
@@ -185,7 +185,7 @@ with tabs[0]:
         
         # Select items
         st.write('Digite a quantidade que deseja de cada item.')
-        df_order_editor = st.experimental_data_editor(df_order, width=500, height=500)
+        df_order_editor = st.data_editor(df_order, width=500, height=500)
         
         if st.button('Revisar Pedido'):
             
